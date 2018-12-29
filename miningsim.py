@@ -8,10 +8,6 @@ np.random.seed(list(b'BCH'))
 
 Block = namedtuple("Block", "id parent height timestamp difficulty chainwork")
 
-initial_difficulty = 600.*5e18
-genesis = Block(0, None, 0, 0, initial_difficulty)
-next_block_id = 1
-
 class BlockTip:
     """ Pointer to a block with extra info:
     - info needed for difficulty adjustment
@@ -56,29 +52,42 @@ class BlockTip:
             block = block.parent
         return cls(newblock, diffs[i+1:])
 
-genesistip = BlockTip.from_block(genesis)
-
 class BasicMiner:
-    blockinfo = [None]*maxNblocks
-
-    def __init__(self, hashrate):
+    def __init__(self, hashrate, starttip, name=None):
+        if name is None:
+            name = "Miner %x"%(id(self),)
+        self.name = name
         self.hashrate = hashrate
-        self.chaintips = [genesistip]  # known chain tips
-        self.besttip = genesistip
-        self.blockinfo = self.blockinfo.copy()
+        self.chaintips = [starttip]  # known chain tips
+        self.besttip = starttip
     def receiveblock(self, newtip, time):
-        pass
+        # Called when block is broadcasted.
+        if newtip.block.chainwork > self.besttip.block.chainwork:
+            self.besttip = newtip
     def minedblock(self, newtip, time):
-        """ Called when block is successfully mined. """
+        # Called when block is successfully mined.
         # Return False to broadcast the new block; return True to hide block.
-        pass
+        return
     def getmining(self):
         return (self.hashrate, self.besttip)
 
+class SwitchMiner(BasicMiner):
+    """ Like BasicMiner but only mines if difficulty is less than diff_threshold."""
+    def __init__(self, hashrate, starttip, diff_threshold, name=None):
+        BasicMiner.__init__(self, hashrate, starttip, name)
+        self.diff_threshold = diff_threshold
+    def getmining(self):
+        if self.besttip.next_difficulty < self.diff_threshold:
+            return (self.hashrate, self.besttip)
+        else:
+            return (0., self.besttip)
+
+
 class Simulation:
     def __init__(self, miners):
-        self.time = 0
         self.miners = list(miners)
+        self.next_id = 1
+        self.time = 0
         self.stopping = False
 
     def run(self, maxruntime):
@@ -93,9 +102,18 @@ class Simulation:
                 # threshold.
                 self.time = maxruntime
                 return
-            timestamp = int(newtime) # timestamps are integers
-
             self.time = newtime
+            timestamp = int(newtime) # timestamps are integers
+            block = winner_tip.block
+            difficulty = winner_tip.next_difficulty
+            newblock = Block(self.next_id, block, block.height+1, timestamp,
+                             difficulty, block.chainwork + difficulty)
+            newtip = BlockTip.from_parent_tip(newblock, winner_tip)
+
+            if not winner.minedblock(newtip, self.time):
+                for m in self.miners:
+                    m.receiveblock(newtip, self.time)
+            print("%15.3f: Block found by %s, h%d, %.2fZH"%(self.time, winner.name, newblock.height, difficulty/1e21))
 
 
     def nextblock(self,):
