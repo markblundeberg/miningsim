@@ -6,15 +6,16 @@ Test a mining situation where difficulty is high, then:
 """
 from miningsim import *
 
-initial_difficulty = 600.*5e18
-genesis = Block(0, None, 0, 0, initial_difficulty, 0)
-genesistip = BlockTip.from_block(genesis)
+np.random.seed(list(b'off sim'))
 
-miners = [BasicMiner(5e18, genesistip, name="Strong Miners"),
-          BasicMiner(0.1e18, genesistip, name="Weak Miner"),
+initial_difficulty = 600.*5e18
+blocktree = BlockTree(initial_difficulty)
+
+miners = [BasicMiner(blocktree, 5.0e18, name="Strong Miners"),
+          BasicMiner(blocktree, 0.1e18, name="Weak Miner"),
           ]
 
-sim = Simulation(miners)
+sim = Simulation(blocktree, miners)
 
 sim.run(2 * 86400)
 

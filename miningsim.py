@@ -4,15 +4,89 @@ Bitcoin Cash mining simulator
 from collections import namedtuple
 import numpy as np
 
-np.random.seed(list(b'BCH'))
+###
+# Blockchain / blocktree
+###
 
 Block = namedtuple("Block", "id parent height timestamp difficulty chainwork")
 
-class BlockTip:
+class BlockPoint:
+    """ Marker for special blocks on the blocktree:
+    - fork blocks
+    - tips
+    """
+    __slots__ = ["block", "parentpoint", "forks"]
+    def __init__(self, block, parentpoint):
+        self.block = block
+        self.parentpoint = parentpoint # single upstream point
+        self.forks = () # multiple downstream points
+
+class BlockTree:
+    """
+    Holds a tree of Blocks (initialized with a genesis block) and manages
+    the overall tree structure with BlockPoints.
+    """
+    def __init__(self, initial_difficulty):
+        self.genesis = Block(0, None, 0, 0, initial_difficulty, 0)
+        self.next_id = 1
+        genpoint = BlockPoint(self.genesis, None)
+        self.nextpoint = {0: genpoint}
+        self.bestblock = self.genesis
+
+    def addblock(self, block):
+        """
+        Include a given block
+        """
+        assert block.id not in self.nextpoint
+        pb = block.parent
+        pp = self.nextpoint[pb.id]
+        if pp.block is pb:
+            # block appended to an existing point
+            if pp.forks:
+                # the point was a fork -- add a new branch.
+                point = BlockPoint(block, pp)
+                pp.forks = pp.forks + (point,)
+                self.nextpoint[block.id] = point
+            else:
+                # the point was a tip -- just move forward
+                pp.block = block
+                self.nextpoint[block.id] = pp
+        else:
+            # block appended to non-point -- need to add two points:
+            # a fork and a new tip.
+            fp = BlockPoint(block, pp.parent)
+            fp.forks = (pp,)
+            pp.parent = fp
+            point = BlockPoint(block, fp)
+            self.nextpoint[block.id] = point
+            # traverse history and update pointers to the new point
+            b = pb
+            while self.nextpoint[block.id] is pp:
+                self.nextpoint[block.id] = fp
+                b = b.parent
+
+        if self.bestblock.chainwork < block.chainwork:
+            self.bestblock = block
+
+    def newblock(self, parent, timestamp, difficulty):
+        """ Create and add a new block """
+        newblock = Block(self.next_id, parent, parent.height+1, timestamp,
+                         difficulty, parent.chainwork + difficulty)
+        self.next_id += 1
+        self.addblock(newblock)
+        return newblock
+
+###
+# Mining
+###
+
+class MiningTip:
     """ Pointer to a block with extra info:
     - info needed for difficulty adjustment
-    - chainwork
     - other stuff if needed
+
+    (this exists since difficulty adjustment algo has a long memory and
+    traversing the block linked list every time is slow.)
     """
     def __init__(self, newblock, history):
         self.block = newblock
@@ -53,11 +127,14 @@ class BlockTip:
         return cls(newblock, diffs[i+1:])
 
 class BasicMiner:
-    def __init__(self, hashrate, starttip, name=None):
+    """ The most basic miner -- mines longest chain at constant hashrate. """
+    def __init__(self, blocktree, hashrate, name=None):
         if name is None:
             name = "Miner %x"%(id(self),)
+        self.blocktree = blocktree
         self.name = name
         self.hashrate = hashrate
+        starttip = MiningTip.from_block(blocktree.bestblock)
         self.chaintips = [starttip]  # known chain tips
         self.besttip = starttip
     def receiveblock(self, newtip, time):
@@ -73,8 +150,8 @@ class BasicMiner:
 
 class SwitchMiner(BasicMiner):
     """ Like BasicMiner but only mines if difficulty is less than diff_threshold."""
-    def __init__(self, hashrate, starttip, diff_threshold, name=None):
-        BasicMiner.__init__(self, hashrate, starttip, name)
+    def __init__(self, blocktree, hashrate, diff_threshold, name=None):
+        BasicMiner.__init__(self, blocktree, hashrate, name)
         self.diff_threshold = diff_threshold
     def getmining(self):
         if self.besttip.next_difficulty < self.diff_threshold:
@@ -82,12 +159,14 @@ class SwitchMiner(BasicMiner):
         else:
             return (0., self.besttip)
 
-
 class Simulation:
-    def __init__(self, miners):
+    """
+    Time simulation of mining
+    """
+    def __init__(self, blocktree, miners, starttime=0):
+        self.blocktree = blocktree
         self.miners = list(miners)
-        self.next_id = 1
-        self.time = 0
+        self.time = starttime
         self.stopping = False
 
     def run(self, maxruntime):
@@ -104,11 +183,10 @@ class Simulation:
                 return
             self.time = newtime
             timestamp = int(newtime) # timestamps are integers
-            block = winner_tip.block
+            parent = winner_tip.block
             difficulty = winner_tip.next_difficulty
-            newblock = Block(self.next_id, block, block.height+1, timestamp,
-                             difficulty, block.chainwork + difficulty)
-            newtip = BlockTip.from_parent_tip(newblock, winner_tip)
+            newblock = self.blocktree.newblock(parent, timestamp, difficulty)
+            newtip = MiningTip.from_parent_tip(newblock, winner_tip)
 
             if not winner.minedblock(newtip, self.time):
                 for m in self.miners:
