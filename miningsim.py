@@ -149,7 +149,11 @@ class BasicMiner:
         return (self.hashrate, self.besttip)
 
 class SwitchMiner(BasicMiner):
-    """ Like BasicMiner but only mines if difficulty is less than diff_threshold."""
+    """ Like BasicMiner but only mines if difficulty is less than diff_threshold.
+
+    This emulates the profit-seeking behaviour of miners like BTC.TOP who
+    mine BTC or BCH depending on which is currently more profitable.
+    """
     def __init__(self, blocktree, hashrate, diff_threshold, name=None):
         BasicMiner.__init__(self, blocktree, hashrate, name)
         self.diff_threshold = diff_threshold
@@ -163,7 +167,7 @@ class Simulation:
     """
     Time simulation of mining
     """
-    def __init__(self, blocktree, miners, starttime=0):
+    def __init__(self, blocktree, miners, starttime=0, debug=False):
         self.blocktree = blocktree
         self.miners = list(miners)
         self.time = starttime
@@ -191,7 +195,8 @@ class Simulation:
             if not winner.minedblock(newtip, self.time):
                 for m in self.miners:
                     m.receiveblock(newtip, self.time)
-            print("%15.3f: Block found by %s, h%d, %.2fZH"%(self.time, winner.name, newblock.height, difficulty/1e21))
+            if self.debug:
+                print("%15.3f: Block found by %s, h%d, %.2fZH"%(self.time, winner.name, newblock.height, difficulty/1e21))
 
 
     def nextblock(self,):

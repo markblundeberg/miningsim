@@ -15,11 +15,13 @@ miners = [BasicMiner(blocktree, 5.0e18, name="Strong Miners"),
           BasicMiner(blocktree, 0.1e18, name="Weak Miner"),
           ]
 
-sim = Simulation(blocktree, miners)
+sim = Simulation(blocktree, miners, debug=True)
 
 sim.run(2 * 86400)
 
-sim.miners.pop(0) # remove the big miner
-sim.time += 10*86400 # add a bunch of days
+print("----remove big miner")
+sim.miners.pop(0)
+print("----fast forward simulation by 10 days")
+sim.time += 10*86400
 
 sim.run(30 * 86400)
